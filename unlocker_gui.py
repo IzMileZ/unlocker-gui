@@ -39,33 +39,6 @@ def get_base_dir():
         return sys._MEIPASS
     return os.path.dirname(os.path.abspath(__file__))
 
-def find_dll_file():
-    """Busca el archivo version.dll en múltiples ubicaciones posibles."""
-    base_dir = get_base_dir()
-    
-    # Posibles ubicaciones del DLL (orden de búsqueda)
-    possible_paths = [
-        # Dentro de las carpetas específicas
-        os.path.join(base_dir, "ea_app", VERSION_DLL),
-        os.path.join(base_dir, "origin", VERSION_DLL),
-        # En la raíz
-        os.path.join(base_dir, VERSION_DLL),
-        # En subcarpetas (por si acaso)
-        os.path.join(base_dir, "EA App", VERSION_DLL),
-        os.path.join(base_dir, "Origin", VERSION_DLL),
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            print(f"✅ DLL encontrado en: {path}")
-            return path
-    
-    # Si no encuentra, lanza error con información útil
-    error_msg = f"No se encontró {VERSION_DLL} en:\n"
-    for path in possible_paths[:4]:  # Mostrar solo las primeras 4 rutas
-        error_msg += f"- {path}\n"
-    raise FileNotFoundError(error_msg)
-
 def is_admin():
     """Verifica si el programa se ejecuta como administrador."""
     try:
@@ -275,6 +248,34 @@ class UnlockerApp(ctk.CTk):
         
         return locations
 
+    # 🔧 CORREGIDO: Ahora es método de la clase (con self)
+    def find_dll_file(self):
+        """Busca el archivo version.dll en múltiples ubicaciones posibles."""
+        base_dir = get_base_dir()
+        
+        # Posibles ubicaciones del DLL (orden de búsqueda)
+        possible_paths = [
+            # Dentro de las carpetas específicas
+            os.path.join(base_dir, "ea_app", VERSION_DLL),
+            os.path.join(base_dir, "origin", VERSION_DLL),
+            # En la raíz
+            os.path.join(base_dir, VERSION_DLL),
+            # En subcarpetas (por si acaso)
+            os.path.join(base_dir, "EA App", VERSION_DLL),
+            os.path.join(base_dir, "Origin", VERSION_DLL),
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                print(f"✅ DLL encontrado en: {path}")
+                return path
+        
+        # Si no encuentra, lanza error con información útil
+        error_msg = f"No se encontró {VERSION_DLL} en:\n"
+        for path in possible_paths[:4]:  # Mostrar solo las primeras 4 rutas
+            error_msg += f"- {path}\n"
+        raise FileNotFoundError(error_msg)
+
     def check_admin_and_continue(self):
         """Verifica permisos de admin antes de continuar."""
         if not is_admin():
@@ -354,9 +355,9 @@ class UnlockerApp(ctk.CTk):
     def run_install_process(self):
         """Ejecuta el proceso de instalación."""
         try:
-            # PASO 1: Verificar archivos (usando la nueva función find_dll_file)
+            # PASO 1: Verificar archivos - 🔧 CORREGIDO: ahora usa self.find_dll_file()
             self.log_status("Verificando archivos del Unlocker...")
-            dll_path = find_dll_file()  # Esto buscará el DLL en múltiples ubicaciones
+            dll_path = self.find_dll_file()  # ✅ AHORA SÍ con self
             self.log_status(f"✅ DLL encontrado: {os.path.basename(os.path.dirname(dll_path)) if 'ea_app' in dll_path or 'origin' in dll_path else 'raíz'}")
 
             # PASO 2: Crear directorio de configuración
@@ -530,8 +531,8 @@ class UnlockerApp(ctk.CTk):
     def verify_unlocker_files(self):
         """Verifica que todos los archivos necesarios existen (versión mejorada)."""
         try:
-            # Usar find_dll_file en lugar de verificar rutas fijas
-            dll_path = find_dll_file()
+            # 🔧 CORREGIDO: ahora usa self.find_dll_file()
+            dll_path = self.find_dll_file()  # ✅ AHORA SÍ con self
             self.log_status(f"✅ DLL encontrado en: {os.path.dirname(dll_path)}")
             
             # Verificar otros archivos
