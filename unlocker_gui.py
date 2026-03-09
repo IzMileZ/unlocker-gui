@@ -23,32 +23,34 @@ APPDATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser("~")), '
 
 # Posibles ubicaciones donde el unlocker PUEDE estar instalado (sistema)
 def get_ea_app_paths():
-    """Obtiene rutas de EA App (versión corregida)"""
-    program_files = os.environ.get('ProgramFiles', 'C:\\Program Files')
-    program_files_x86 = os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)')
-    local_app_data = os.environ.get('LocalAppData', '')
+    """Devuelve todas las rutas posibles donde puede estar EA App"""
     
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    local_app_data = os.environ.get("LocalAppData", "")
+
     paths = [
-        # Ruta principal de EA Desktop (la correcta)
-        os.path.join(program_files, 'Electronic Arts', 'EA Desktop', 'EA Desktop'),
-        os.path.join(program_files_x86, 'Electronic Arts', 'EA Desktop', 'EA Desktop'),
-        # También mantener la ruta antigua por si acaso (algunas versiones antiguas)
-        os.path.join(program_files, 'EA Games', 'EA Desktop'),
-        os.path.join(program_files_x86, 'EA Games', 'EA Desktop'),
+        os.path.join(program_files, "Electronic Arts", "EA Desktop", "EA Desktop"),
+        os.path.join(program_files, "Electronic Arts", "EA Desktop"),
+        os.path.join(program_files, "EA Games", "EA Desktop", "EA Desktop"),
+        os.path.join(program_files, "EA Games", "EA Desktop"),
+
+        os.path.join(program_files_x86, "Electronic Arts", "EA Desktop", "EA Desktop"),
+        os.path.join(program_files_x86, "Electronic Arts", "EA Desktop"),
+        os.path.join(program_files_x86, "EA Games", "EA Desktop", "EA Desktop"),
+        os.path.join(program_files_x86, "EA Games", "EA Desktop"),
     ]
-    
+
     if local_app_data:
-        paths.append(os.path.join(local_app_data, 'Programs', 'EA Desktop'))
-    
-    # Eliminar duplicados manteniendo el orden
-    seen = set()
-    unique_paths = []
-    for path in paths:
-        if path not in seen:
-            seen.add(path)
-            unique_paths.append(path)
-    
-    return unique_paths
+        paths.append(os.path.join(local_app_data, "Programs", "EA Desktop"))
+
+    # solo devolver las que realmente existen
+    valid_paths = []
+    for p in paths:
+        if os.path.exists(p):
+            valid_paths.append(p)
+
+    return valid_paths
 
 def get_origin_paths():
     """Obtiene rutas de Origin (sin filtrar)"""
@@ -80,6 +82,27 @@ def is_admin():
         return ctypes.windll.shell32.IsUserAnAdmin()
     except:
         return False
+
+def install_dll_direct(self, dll_source):
+    """Copia version.dll directamente a EA App"""
+
+    paths = get_ea_app_paths()
+
+    if not paths:
+        raise Exception("No se encontró instalación de EA App.")
+
+    installed = False
+
+    for path in paths:
+        try:
+            target = os.path.join(path, VERSION_DLL)
+            shutil.copy2(dll_source, target)
+            print(f"✓ DLL copiado en {target}")
+            installed = True
+        except Exception as e:
+            print(f"No se pudo copiar en {path}: {e}")
+
+    return installed
 
 def run_as_admin():
     """Reinicia el programa con permisos de administrador."""
@@ -412,7 +435,7 @@ class UnlockerApp(ctk.CTk):
                 
                 # Ejecutar setup.bat para instalar
                 self.log_status("Instalando el Unlocker en EA App/Origin...")
-                success = self.run_setup_bat_install()
+                success = self.install_dll_direct(dll_source)
                 
                 # Limpiar archivo temporal
                 if os.path.exists(temp_dll):
