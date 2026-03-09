@@ -38,10 +38,14 @@ jobs:
 
     - name: Verificar ejecutable
       run: |
-        echo "=== Tamaño del ejecutable ==="
-        dir dist
-        echo "=== Verificar que existe ==="
-        if exist dist\Kai_Unlocker.exe (echo "✅ Ejecutable creado") else (echo "❌ Error")
+        Write-Host "=== Tamaño del ejecutable ==="
+        Get-ChildItem dist
+        Write-Host "=== Verificar que existe ==="
+        if (Test-Path "dist/Kai_Unlocker.exe") {
+            Write-Host "✅ Ejecutable creado"
+        } else {
+            Write-Host "❌ Error"
+        }
 
     - name: Subir el .exe como Artefacto
       uses: actions/upload-artifact@v4
