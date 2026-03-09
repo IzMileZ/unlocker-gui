@@ -41,10 +41,17 @@ def get_origin_paths():
     return [p for p in paths if p and os.path.exists(os.path.dirname(p))]
 
 def get_base_dir():
-    """Obtiene el directorio base del ejecutable o script."""
+    """Obtiene el directorio base donde están los ARCHIVOS EMPAQUETADOS."""
     if getattr(sys, 'frozen', False):
         # Cuando está empaquetado con PyInstaller, los archivos están en _MEIPASS
         return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+def get_executable_dir():
+    """Obtiene el directorio DONDE ESTÁ EL EJECUTABLE (no los archivos temporales)"""
+    if getattr(sys, 'frozen', False):
+        # El ejecutable está en una carpeta temporal, pero necesitamos la ubicación REAL
+        return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
 def is_admin():
@@ -242,11 +249,17 @@ class UnlockerApp(ctk.CTk):
     def get_packaged_dll(self):
         """Obtiene el DLL DESDE EL PAQUETE (para instalación inicial)"""
         base_dir = get_base_dir()
+        exe_dir = get_executable_dir()
         
         possible_paths = [
+            # Buscar en el paquete (cuando está empaquetado)
             os.path.join(base_dir, "ea_app", VERSION_DLL),
             os.path.join(base_dir, "origin", VERSION_DLL),
             os.path.join(base_dir, VERSION_DLL),
+            # Buscar junto al ejecutable (por si acaso)
+            os.path.join(exe_dir, "ea_app", VERSION_DLL),
+            os.path.join(exe_dir, "origin", VERSION_DLL),
+            os.path.join(exe_dir, VERSION_DLL),
         ]
         
         for path in possible_paths:
@@ -374,11 +387,11 @@ class UnlockerApp(ctk.CTk):
                         "Asegúrate de que los archivos están en las carpetas 'ea_app' y 'origin'."
                     )
                 
-                # Preparar para instalación
-                base_dir = os.path.dirname(get_base_dir()) if getattr(sys, 'frozen', False) else get_base_dir()
-                temp_dll = os.path.join(base_dir, VERSION_DLL)
+                # Preparar para instalación - usar directorio temporal
+                temp_dir = os.environ.get('TEMP', os.path.expanduser("~"))
+                temp_dll = os.path.join(temp_dir, VERSION_DLL)
                 
-                # Copiar el DLL al directorio de trabajo para setup.bat
+                # Copiar el DLL al directorio temporal para setup.bat
                 self.log_status("Preparando archivos para instalación...")
                 shutil.copy2(dll_source, temp_dll)
                 
@@ -455,28 +468,18 @@ class UnlockerApp(ctk.CTk):
 
             # PASO 2: Ejecutar setup.bat con uninstall primero (más limpio)
             self.log_status("Ejecutando desinstalación con setup.bat...")
-            base_dir = os.path.dirname(get_base_dir()) if getattr(sys, 'frozen', False) else get_base_dir()
-            bat_path = os.path.join(base_dir, "setup.bat")
+            
+            # Para setup.bat, usamos el directorio temporal
+            temp_dir = os.environ.get('TEMP', os.path.expanduser("~"))
+            temp_dll = os.path.join(temp_dir, VERSION_DLL)
             
             # Necesitamos el DLL para la desinstalación también
             dll_source = self.get_packaged_dll()
             if dll_source:
-                temp_dll = os.path.join(base_dir, VERSION_DLL)
                 shutil.copy2(dll_source, temp_dll)
             
-            if os.path.exists(bat_path):
-                try:
-                    process = subprocess.Popen(
-                        [bat_path, "uninstall"],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        cwd=base_dir,
-                        shell=True,
-                        universal_newlines=True
-                    )
-                    process.communicate(timeout=30)
-                except Exception as e:
-                    print(f"setup.bat uninstall error: {e}")
+            # Ejecutar setup.bat
+            self.run_setup_bat_uninstall()
             
             # Limpiar DLL temporal
             if os.path.exists(temp_dll):
@@ -583,12 +586,29 @@ class UnlockerApp(ctk.CTk):
 
     def run_setup_bat_install(self):
         """Ejecuta setup.bat con el argumento 'install'."""
-        base_dir = os.path.dirname(get_base_dir()) if getattr(sys, 'frozen', False) else get_base_dir()
-        bat_path = os.path.join(base_dir, "setup.bat")
-        log_path = os.path.join(os.environ.get('TEMP', base_dir), "unlocker_install_log.txt")
+        # Buscar setup.bat en los lugares correctos
+        base_dir = get_base_dir()
+        exe_dir = get_executable_dir()
         
-        if not os.path.exists(bat_path):
-            raise FileNotFoundError(f"No se encontró setup.bat en: {base_dir}")
+        possible_bat_paths = [
+            os.path.join(base_dir, "setup.bat"),
+            os.path.join(exe_dir, "setup.bat"),
+        ]
+        
+        bat_path = None
+        for path in possible_bat_paths:
+            if os.path.exists(path):
+                bat_path = path
+                break
+        
+        if not bat_path:
+            raise FileNotFoundError(
+                f"No se encontró setup.bat en:\n- {base_dir}\n- {exe_dir}"
+            )
+        
+        # Usar TEMP como directorio de trabajo
+        work_dir = os.environ.get('TEMP', os.path.expanduser("~"))
+        log_path = os.path.join(work_dir, "unlocker_install_log.txt")
         
         try:
             self.log_status("Ejecutando instalador... (esto puede tomar unos segundos)")
@@ -597,7 +617,7 @@ class UnlockerApp(ctk.CTk):
                 [bat_path, "install"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=base_dir,
+                cwd=work_dir,
                 shell=True,
                 universal_newlines=True
             )
@@ -607,7 +627,7 @@ class UnlockerApp(ctk.CTk):
             # Guardar log para depuración
             with open(log_path, "w", encoding="utf-8") as log_f:
                 log_f.write(f"Comando: {bat_path} install\n")
-                log_f.write(f"CWD: {base_dir}\n")
+                log_f.write(f"CWD: {work_dir}\n")
                 log_f.write(f"Return code: {process.returncode}\n\n")
                 log_f.write(f"--- STDOUT ---\n{stdout}\n\n--- STDERR ---\n{stderr}")
             
@@ -626,6 +646,44 @@ class UnlockerApp(ctk.CTk):
             raise Exception("setup.bat tardó demasiado. El antivirus puede estar bloqueándolo.")
         except Exception as e:
             raise Exception(f"Fallo al ejecutar setup.bat install:\n{str(e)}")
+
+    def run_setup_bat_uninstall(self):
+        """Ejecuta setup.bat con el argumento 'uninstall'."""
+        # Buscar setup.bat en los lugares correctos
+        base_dir = get_base_dir()
+        exe_dir = get_executable_dir()
+        
+        possible_bat_paths = [
+            os.path.join(base_dir, "setup.bat"),
+            os.path.join(exe_dir, "setup.bat"),
+        ]
+        
+        bat_path = None
+        for path in possible_bat_paths:
+            if os.path.exists(path):
+                bat_path = path
+                break
+        
+        if not bat_path:
+            # Si no hay setup.bat, solo continuar (no es crítico para desinstalar)
+            print("setup.bat no encontrado, continuando con desinstalación manual")
+            return
+        
+        # Usar TEMP como directorio de trabajo
+        work_dir = os.environ.get('TEMP', os.path.expanduser("~"))
+        
+        try:
+            process = subprocess.Popen(
+                [bat_path, "uninstall"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=work_dir,
+                shell=True,
+                universal_newlines=True
+            )
+            process.communicate(timeout=30)
+        except Exception as e:
+            print(f"setup.bat uninstall error: {e}")
 
     def check_and_update_ini(self, filename, url):
         """Descarga el .ini desde GitHub y lo instala."""
@@ -652,12 +710,16 @@ class UnlockerApp(ctk.CTk):
     def install_local_file(self, filename, target_dir):
         """Copia un archivo empaquetado al directorio destino."""
         base_dir = get_base_dir()
+        exe_dir = get_executable_dir()
         
         # Buscar el archivo en múltiples ubicaciones
         possible_sources = [
             os.path.join(base_dir, filename),
             os.path.join(base_dir, "ea_app", filename),
             os.path.join(base_dir, "origin", filename),
+            os.path.join(exe_dir, filename),
+            os.path.join(exe_dir, "ea_app", filename),
+            os.path.join(exe_dir, "origin", filename),
         ]
         
         source_path = None
@@ -669,7 +731,7 @@ class UnlockerApp(ctk.CTk):
         if not source_path:
             raise FileNotFoundError(
                 f"No se encontró el archivo '{filename}'\n"
-                f"Buscado en:\n" + "\n".join(possible_sources)
+                f"Buscado en:\n" + "\n".join(possible_sources[:4])  # Mostrar solo algunos
             )
         
         target_path = os.path.join(target_dir, filename)
