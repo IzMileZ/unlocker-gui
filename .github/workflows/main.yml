@@ -40,4 +40,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: Kai_Unlocker
-        path: "dist/Unlocker_GUI.exe"
+        path: "dist/Kai_Unlocker.exe"
