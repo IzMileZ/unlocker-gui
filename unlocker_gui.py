@@ -23,12 +23,16 @@ APPDATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser("~")), '
 
 # Posibles ubicaciones donde el unlocker PUEDE estar instalado (sistema)
 def get_ea_app_paths():
-    """Obtiene rutas de EA App (sin filtrar para permitir verificar después de instalar)"""
+    """Obtiene rutas de EA App (versión corregida)"""
     program_files = os.environ.get('ProgramFiles', 'C:\\Program Files')
     program_files_x86 = os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)')
     local_app_data = os.environ.get('LocalAppData', '')
     
     paths = [
+        # Ruta principal de EA Desktop (la correcta)
+        os.path.join(program_files, 'Electronic Arts', 'EA Desktop', 'EA Desktop'),
+        os.path.join(program_files_x86, 'Electronic Arts', 'EA Desktop', 'EA Desktop'),
+        # También mantener la ruta antigua por si acaso (algunas versiones antiguas)
         os.path.join(program_files, 'EA Games', 'EA Desktop'),
         os.path.join(program_files_x86, 'EA Games', 'EA Desktop'),
     ]
@@ -36,7 +40,15 @@ def get_ea_app_paths():
     if local_app_data:
         paths.append(os.path.join(local_app_data, 'Programs', 'EA Desktop'))
     
-    return paths
+    # Eliminar duplicados manteniendo el orden
+    seen = set()
+    unique_paths = []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            unique_paths.append(path)
+    
+    return unique_paths
 
 def get_origin_paths():
     """Obtiene rutas de Origin (sin filtrar)"""
