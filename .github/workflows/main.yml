@@ -32,9 +32,16 @@ jobs:
           --add-data "config.ini;." `
           --add-data "g_The Sims 3.ini;." `
           --add-data "g_The Sims 4.ini;." `
-          --add-data "ea_app;ea_app" `
-          --add-data "origin;origin" `
+          --add-data "ea_app/version.dll;ea_app" `
+          --add-data "origin/version.dll;origin" `
           unlocker_gui.py
+
+    - name: Verificar ejecutable
+      run: |
+        echo "=== Tamaño del ejecutable ==="
+        dir dist
+        echo "=== Verificar que existe ==="
+        if exist dist\Kai_Unlocker.exe (echo "✅ Ejecutable creado") else (echo "❌ Error")
 
     - name: Subir el .exe como Artefacto
       uses: actions/upload-artifact@v4
