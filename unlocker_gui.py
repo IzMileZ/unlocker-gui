@@ -83,7 +83,7 @@ def is_admin():
     except:
         return False
 
-def install_dll_direct(self, dll_source):
+def install_dll_direct(dll_source):
     """Copia version.dll directamente a EA App"""
 
     paths = get_ea_app_paths()
@@ -435,7 +435,7 @@ class UnlockerApp(ctk.CTk):
                 
                 # Ejecutar setup.bat para instalar
                 self.log_status("Instalando el Unlocker en EA App/Origin...")
-                success = self.install_dll_direct(dll_source)
+                success = install_dll_direct(dll_source)
                 
                 # Limpiar archivo temporal
                 if os.path.exists(temp_dll):
