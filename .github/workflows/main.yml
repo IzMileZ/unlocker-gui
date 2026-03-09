@@ -27,7 +27,7 @@ jobs:
 
     - name: Construir el Ejecutable
       run: |
-        pyinstaller --noconfirm --onefile --windowed --clean --name="Unlocker_GUI" `
+        pyinstaller --noconfirm --onefile --windowed --clean --name="Kai_Unlocker" `
           --add-data "setup.bat;." `
           --add-data "config.ini;." `
           --add-data "g_The Sims 3.ini;." `
