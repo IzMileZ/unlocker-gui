@@ -23,22 +23,30 @@ APPDATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser("~")), '
 
 # Posibles ubicaciones donde el unlocker PUEDE estar instalado (sistema)
 def get_ea_app_paths():
-    """Obtiene rutas válidas de EA App"""
+    """Obtiene rutas de EA App (sin filtrar para permitir verificar después de instalar)"""
+    program_files = os.environ.get('ProgramFiles', 'C:\\Program Files')
+    program_files_x86 = os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)')
+    local_app_data = os.environ.get('LocalAppData', '')
+    
     paths = [
-        os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'EA Games', 'EA Desktop'),
-        os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'EA Games', 'EA Desktop'),
-        os.path.join(os.environ.get('LocalAppData', ''), 'Programs', 'EA Desktop'),
+        os.path.join(program_files, 'EA Games', 'EA Desktop'),
+        os.path.join(program_files_x86, 'EA Games', 'EA Desktop'),
     ]
-    # Filtrar rutas vacías o que no existen
-    return [p for p in paths if p and os.path.exists(os.path.dirname(p))]
+    
+    if local_app_data:
+        paths.append(os.path.join(local_app_data, 'Programs', 'EA Desktop'))
+    
+    return paths
 
 def get_origin_paths():
-    """Obtiene rutas válidas de Origin"""
-    paths = [
-        os.path.join(os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'), 'Origin'),
-        os.path.join(os.environ.get('ProgramFiles', 'C:\\Program Files'), 'Origin'),
+    """Obtiene rutas de Origin (sin filtrar)"""
+    program_files = os.environ.get('ProgramFiles', 'C:\\Program Files')
+    program_files_x86 = os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)')
+    
+    return [
+        os.path.join(program_files_x86, 'Origin'),
+        os.path.join(program_files, 'Origin'),
     ]
-    return [p for p in paths if p and os.path.exists(os.path.dirname(p))]
 
 def get_base_dir():
     """Obtiene el directorio base donde están los ARCHIVOS EMPAQUETADOS."""
@@ -285,11 +293,6 @@ class UnlockerApp(ctk.CTk):
             if os.path.exists(dll_path):
                 locations.append(dll_path)
         
-        # Verificar también en directorio de configuración
-        config_dll = os.path.join(APPDATA_DIR, VERSION_DLL)
-        if os.path.exists(config_dll):
-            locations.append(config_dll)
-        
         return locations
 
     def check_admin_and_continue(self):
@@ -397,7 +400,7 @@ class UnlockerApp(ctk.CTk):
                 
                 # Ejecutar setup.bat para instalar
                 self.log_status("Instalando el Unlocker en EA App/Origin...")
-                self.run_setup_bat_install()
+                success = self.run_setup_bat_install()
                 
                 # Limpiar archivo temporal
                 if os.path.exists(temp_dll):
@@ -406,7 +409,12 @@ class UnlockerApp(ctk.CTk):
                     except:
                         pass
                 
-                self.log_status("✅ Unlocker instalado correctamente")
+                if success:
+                    self.log_status("✅ Unlocker instalado correctamente")
+                    # Pequeña pausa para que el sistema registre los cambios
+                    time.sleep(2)
+                else:
+                    raise Exception("setup.bat no completó la instalación correctamente")
             else:
                 self.log_status(f"✅ Unlocker ya instalado en: {os.path.dirname(installed_dll)}")
             
@@ -433,16 +441,30 @@ class UnlockerApp(ctk.CTk):
             self.log_status("Verificando archivos de configuración...")
             self.verify_config_files()
             
-            self.log_status("¡Instalación completada con éxito!")
+            # PASO 6: VERIFICAR NUEVAMENTE SI EL UNLOCKER ESTÁ INSTALADO
+            self.log_status("Verificando instalación final...")
+            time.sleep(1)
             self.update_installation_status()
             
-            messagebox.showinfo(
-                "Éxito", 
-                "El Unlocker y las configuraciones se instalaron correctamente.\n\n"
-                "Al abrir tu juego, los DLCs estarán disponibles.\n\n"
-                "Si el juego no detecta los DLCs, reinicia tu PC y asegúrate de que\n"
-                "el antivirus no haya bloqueado el archivo version.dll."
-            )
+            if self.is_unlocker_installed():
+                self.log_status("¡Instalación completada con éxito!")
+                messagebox.showinfo(
+                    "Éxito", 
+                    "El Unlocker y las configuraciones se instalaron correctamente.\n\n"
+                    "Al abrir tu juego, los DLCs estarán disponibles.\n\n"
+                    "Si el juego no detecta los DLCs, reinicia tu PC y asegúrate de que\n"
+                    "el antivirus no haya bloqueado el archivo version.dll."
+                )
+            else:
+                self.log_status("⚠ Instalación completada pero no se detectó el Unlocker")
+                messagebox.showwarning(
+                    "Verificación",
+                    "La instalación de configuraciones se completó, pero no se detecta el Unlocker.\n\n"
+                    "Esto puede deberse a:\n"
+                    "- El antivirus bloqueó la instalación del DLL\n"
+                    "- EA App/Origin no está instalado en la ubicación esperada\n\n"
+                    "Puedes intentar ejecutar como administrador o desactivar el antivirus temporalmente."
+                )
             
         except Exception as e:
             self.log_status("Error en la instalación.")
@@ -464,6 +486,8 @@ class UnlockerApp(ctk.CTk):
             
             if not locations:
                 self.log_status("No se encontró el Unlocker.")
+                # Aún así, preguntar si quiere eliminar configuraciones
+                self.ask_delete_configs_only()
                 return
 
             # PASO 2: Ejecutar setup.bat con uninstall primero (más limpio)
@@ -492,49 +516,20 @@ class UnlockerApp(ctk.CTk):
             self.log_status("Eliminando archivos del Unlocker...")
             for dll_path in locations:
                 try:
-                    os.remove(dll_path)
-                    self.log_status(f"✓ Eliminado: {dll_path}")
+                    # Intentar múltiples veces en caso de que el archivo esté bloqueado
+                    for _ in range(3):
+                        try:
+                            os.remove(dll_path)
+                            self.log_status(f"✓ Eliminado: {dll_path}")
+                            break
+                        except:
+                            time.sleep(1)
+                            continue
                 except Exception as e:
                     self.log_status(f"⚠ No se pudo eliminar: {dll_path}")
 
             # PASO 4: Preguntar si eliminar configuraciones
-            response = messagebox.askyesno(
-                "Eliminar Configuraciones",
-                "¿Deseas eliminar también las configuraciones del Unlocker?\n\n"
-                "Esto borrará todos los archivos .ini guardados."
-            )
-            
-            if response:
-                self.log_status("Eliminando configuraciones...")
-                if os.path.exists(APPDATA_DIR):
-                    try:
-                        shutil.rmtree(APPDATA_DIR)
-                        self.log_status("✓ Configuraciones eliminadas")
-                    except Exception as e:
-                        self.log_status(f"⚠ No se pudo eliminar configuraciones: {e}")
-
-            # PASO 5: Verificar resultado
-            self.log_status("Verificando desinstalación...")
-            time.sleep(1)
-            
-            if self.is_unlocker_installed():
-                self.log_status("⚠ Algunos archivos no pudieron ser eliminados")
-                remaining = self.find_unlocker_locations()
-                if remaining:
-                    messagebox.showwarning(
-                        "Desinstalación Parcial",
-                        f"Algunos archivos no pudieron ser eliminados:\n\n" +
-                        "\n".join(remaining) +
-                        "\n\nPuedes eliminarlos manualmente o reiniciar tu PC e intentar de nuevo."
-                    )
-            else:
-                self.log_status("✓ Unlocker desinstalado correctamente")
-                self.update_installation_status()
-                messagebox.showinfo(
-                    "Éxito",
-                    "El Unlocker ha sido desinstalado correctamente.\n\n"
-                    "Los juegos volverán a su estado original."
-                )
+            self.ask_delete_configs()
             
         except Exception as e:
             self.log_status("Error en la desinstalación.")
@@ -548,17 +543,84 @@ class UnlockerApp(ctk.CTk):
             self.chk_sims3.configure(state="normal")
             self.update_installation_status()
 
+    def ask_delete_configs_only(self):
+        """Pregunta si eliminar solo configuraciones (cuando no hay unlocker)"""
+        response = messagebox.askyesno(
+            "Eliminar Configuraciones",
+            "No se encontró el Unlocker instalado.\n\n"
+            "¿Deseas eliminar las configuraciones de todas formas?"
+        )
+        
+        if response:
+            self.log_status("Eliminando configuraciones...")
+            if os.path.exists(APPDATA_DIR):
+                try:
+                    shutil.rmtree(APPDATA_DIR)
+                    self.log_status("✓ Configuraciones eliminadas")
+                    messagebox.showinfo("Éxito", "Configuraciones eliminadas correctamente.")
+                except Exception as e:
+                    self.log_status(f"⚠ No se pudo eliminar configuraciones: {e}")
+                    messagebox.showerror("Error", f"No se pudieron eliminar las configuraciones:\n{e}")
+            else:
+                self.log_status("No hay configuraciones para eliminar")
+                messagebox.showinfo("Información", "No se encontraron configuraciones para eliminar.")
+
+    def ask_delete_configs(self):
+        """Pregunta si eliminar configuraciones después de desinstalar"""
+        response = messagebox.askyesno(
+            "Eliminar Configuraciones",
+            "¿Deseas eliminar también las configuraciones del Unlocker?\n\n"
+            "Esto borrará todos los archivos .ini guardados."
+        )
+        
+        if response:
+            self.log_status("Eliminando configuraciones...")
+            if os.path.exists(APPDATA_DIR):
+                try:
+                    shutil.rmtree(APPDATA_DIR)
+                    self.log_status("✓ Configuraciones eliminadas")
+                except Exception as e:
+                    self.log_status(f"⚠ No se pudo eliminar configuraciones: {e}")
+
+        # Verificar resultado final
+        time.sleep(1)
+        if self.is_unlocker_installed():
+            self.log_status("⚠ Algunos archivos no pudieron ser eliminados")
+            remaining = self.find_unlocker_locations()
+            if remaining:
+                messagebox.showwarning(
+                    "Desinstalación Parcial",
+                    f"Algunos archivos no pudieron ser eliminados:\n\n" +
+                    "\n".join(remaining) +
+                    "\n\nPuedes eliminarlos manualmente o reiniciar tu PC e intentar de nuevo."
+                )
+        else:
+            self.log_status("✓ Unlocker desinstalado correctamente")
+            self.update_installation_status()
+            messagebox.showinfo(
+                "Éxito",
+                "El Unlocker ha sido desinstalado correctamente.\n\n"
+                "Los juegos volverán a su estado original."
+            )
+
     def show_error_message(self, error):
         """Muestra mensaje de error formateado."""
         error_msg = f"Se produjo un error:\n\n{str(error)}"
         
-        if "Acceso denegado" in str(error) or "Permission denied" in str(error):
+        error_str = str(error).lower()
+        
+        if "acceso denegado" in error_str or "permission denied" in error_str:
             error_msg += "\n\nEsto puede deberse a falta de permisos de administrador o antivirus bloqueando la operación."
-        elif "No se encontró" in str(error) and "version.dll" in str(error):
+        elif "no se encontró" in error_str and "version.dll" in error_str:
             error_msg += "\n\nAsegúrate de que los archivos están en las carpetas correctas:\n"
             error_msg += "- ea_app/version.dll\n- origin/version.dll\n- setup.bat\n- config.ini"
-        elif "timed out" in str(error).lower():
+        elif "timed out" in error_str:
             error_msg += "\n\nEl antivirus puede estar bloqueando la instalación. Desactívalo temporalmente."
+        elif "setup.bat" in error_str:
+            error_msg += "\n\nEl instalador (setup.bat) falló. Puede deberse a:\n"
+            error_msg += "- Falta de permisos de administrador\n"
+            error_msg += "- Antivirus bloqueando la ejecución\n"
+            error_msg += "- EA App/Origin no instalado"
         
         messagebox.showerror("Error", error_msg)
 
@@ -581,8 +643,10 @@ class UnlockerApp(ctk.CTk):
         
         if config_files:
             self.log_status(f"✅ Archivos instalados: {', '.join(config_files)}")
+            return True
         else:
             self.log_status("⚠ No se instalaron archivos de configuración")
+            return False
 
     def run_setup_bat_install(self):
         """Ejecuta setup.bat con el argumento 'install'."""
@@ -633,18 +697,22 @@ class UnlockerApp(ctk.CTk):
             
             if process.returncode != 0:
                 error_msg = f"setup.bat terminó con código de error: {process.returncode}"
-                if "Acceso denegado" in stderr:
+                if "acceso denegado" in stderr.lower():
                     error_msg += "\n\nFalta de permisos de administrador."
                 elif "antivirus" in stderr.lower():
                     error_msg += "\n\nPosible bloqueo del antivirus."
-                raise Exception(error_msg)
+                self.log_status(f"⚠ Error en instalador (código {process.returncode})")
+                return False
             
             self.log_status("✅ Instalador ejecutado correctamente")
+            return True
             
         except subprocess.TimeoutExpired:
             process.kill()
+            self.log_status("⚠ Instalador tardó demasiado")
             raise Exception("setup.bat tardó demasiado. El antivirus puede estar bloqueándolo.")
         except Exception as e:
+            self.log_status(f"⚠ Error ejecutando instalador: {str(e)}")
             raise Exception(f"Fallo al ejecutar setup.bat install:\n{str(e)}")
 
     def run_setup_bat_uninstall(self):
@@ -667,7 +735,7 @@ class UnlockerApp(ctk.CTk):
         if not bat_path:
             # Si no hay setup.bat, solo continuar (no es crítico para desinstalar)
             print("setup.bat no encontrado, continuando con desinstalación manual")
-            return
+            return True
         
         # Usar TEMP como directorio de trabajo
         work_dir = os.environ.get('TEMP', os.path.expanduser("~"))
@@ -682,8 +750,10 @@ class UnlockerApp(ctk.CTk):
                 universal_newlines=True
             )
             process.communicate(timeout=30)
+            return True
         except Exception as e:
             print(f"setup.bat uninstall error: {e}")
+            return False
 
     def check_and_update_ini(self, filename, url):
         """Descarga el .ini desde GitHub y lo instala."""
@@ -699,13 +769,14 @@ class UnlockerApp(ctk.CTk):
             with open(target_path, 'wb') as f:
                 f.write(content)
             self.log_status(f"✓ {filename} actualizado desde GitHub")
+            return True
             
         except urllib.error.URLError:
             print(f"[!] Sin internet o GitHub no disponible. Usando versión local de {filename}")
-            self.install_local_file(filename, APPDATA_DIR)
+            return self.install_local_file(filename, APPDATA_DIR)
         except Exception as e:
             print(f"[!] Error descargando {filename}: {e}")
-            self.install_local_file(filename, APPDATA_DIR)
+            return self.install_local_file(filename, APPDATA_DIR)
 
     def install_local_file(self, filename, target_dir):
         """Copia un archivo empaquetado al directorio destino."""
@@ -731,7 +802,7 @@ class UnlockerApp(ctk.CTk):
         if not source_path:
             raise FileNotFoundError(
                 f"No se encontró el archivo '{filename}'\n"
-                f"Buscado en:\n" + "\n".join(possible_sources[:4])  # Mostrar solo algunos
+                f"Buscado en:\n" + "\n".join(possible_sources[:4])
             )
         
         target_path = os.path.join(target_dir, filename)
@@ -742,6 +813,7 @@ class UnlockerApp(ctk.CTk):
             raise Exception(f"Error al copiar {filename} a {target_dir}")
         
         self.log_status(f"✓ {filename} copiado correctamente")
+        return True
 
 
 if __name__ == "__main__":
