@@ -11,21 +11,53 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - name: Repositorio
+    - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Configurar Python
+    - name: Verify required files
+      shell: pwsh
+      run: |
+        Write-Host "=== VERIFICANDO ARCHIVOS NECESARIOS ===" -ForegroundColor Cyan
+        $requiredFiles = @(
+            "unlocker_gui.py",
+            "setup.bat",
+            "config.ini",
+            "g_The Sims 3.ini",
+            "g_The Sims 4.ini",
+            "ea_app/version.dll",
+            "origin/version.dll"
+        )
+        
+        $missingFiles = @()
+        foreach ($file in $requiredFiles) {
+            if (Test-Path $file) {
+                Write-Host "✅ $file" -ForegroundColor Green
+            } else {
+                Write-Host "❌ $file" -ForegroundColor Red
+                $missingFiles += $file
+            }
+        }
+        
+        if ($missingFiles.Count -gt 0) {
+            Write-Host "`nERROR: Archivos faltantes:" -ForegroundColor Red
+            $missingFiles | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+        }
+        
+        Write-Host "`n✅ Todos los archivos requeridos existen" -ForegroundColor Green
+
+    - name: Setup Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
 
-    - name: Instalar dependencias
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pyinstaller customtkinter
         if (Test-Path requirements.txt) { pip install -r requirements.txt }
 
-    - name: Construir el Ejecutable
+    - name: Build executable
       run: |
         pyinstaller --noconfirm --onefile --windowed --clean --name="Kai_Unlocker" `
           --add-data "setup.bat;." `
@@ -36,19 +68,27 @@ jobs:
           --add-data "origin/version.dll;origin" `
           unlocker_gui.py
 
-    - name: Verificar ejecutable
+    - name: Verify executable
+      shell: pwsh
       run: |
-        Write-Host "=== Tamaño del ejecutable ==="
-        Get-ChildItem dist
-        Write-Host "=== Verificar que existe ==="
-        if (Test-Path "dist/Kai_Unlocker.exe") {
-            Write-Host "✅ Ejecutable creado"
+        Write-Host "=== VERIFICANDO EJECUTABLE ===" -ForegroundColor Cyan
+        $exePath = "dist/Kai_Unlocker.exe"
+        
+        if (Test-Path $exePath) {
+            $fileInfo = Get-Item $exePath
+            Write-Host "✅ Ejecutable creado: $exePath" -ForegroundColor Green
+            Write-Host "   Tamaño: $([math]::Round($fileInfo.Length/1MB, 2)) MB"
+            Write-Host "   Modificado: $($fileInfo.LastWriteTime)"
         } else {
-            Write-Host "❌ Error"
+            Write-Host "❌ ERROR: No se encontró el ejecutable" -ForegroundColor Red
+            Write-Host "Contenido de dist/:" -ForegroundColor Yellow
+            Get-ChildItem dist
+            exit 1
         }
 
-    - name: Subir el .exe como Artefacto
+    - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: Kai_Unlocker
-        path: "dist/Kai_Unlocker.exe"
+        path: dist/Kai_Unlocker.exe
+        if-no-files-found: error
