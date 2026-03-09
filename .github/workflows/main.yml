@@ -1,0 +1,43 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Repositorio
+      uses: actions/checkout@v4
+
+    - name: Configurar Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller customtkinter
+        if (Test-Path requirements.txt) { pip install -r requirements.txt }
+
+    - name: Construir el Ejecutable
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --clean --name="Unlocker_GUI" `
+          --add-data "setup.bat;." `
+          --add-data "config.ini;." `
+          --add-data "g_The Sims 3.ini;." `
+          --add-data "g_The Sims 4.ini;." `
+          --add-data "ea_app;ea_app" `
+          --add-data "origin;origin" `
+          unlocker_gui.py
+
+    - name: Subir el .exe como Artefacto
+      uses: actions/upload-artifact@v4
+      with:
+        name: Kai_Unlocker
+        path: "dist/Unlocker_GUI.exe"
