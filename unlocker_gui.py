@@ -8,15 +8,22 @@ import urllib.error
 import ctypes
 import time
 import customtkinter as ctk
-from tkinter import messagebox
+from tkinter import messagebox, filedialog
 from pathlib import Path
+import zipfile
+import requests
+import tempfile
 
 # --- CONFIGURACIÓN ---
 GITHUB_INI_URL = "https://raw.githubusercontent.com/IzMileZ/the-sims-4/refs/heads/main/g_The%20Sims%204.ini"
+GITHUB_TS3_INI_URL = "https://raw.githubusercontent.com/IzMileZ/the-sims-3/refs/heads/main/g_The%20Sims%203.ini"
 INI_TS4 = "g_The Sims 4.ini"
 INI_TS3 = "g_The Sims 3.ini"
 CONFIG_INI = "config.ini"
 VERSION_DLL = "version.dll"
+
+# URL de Gofile para los DLCs completos de Sims 3
+GOFILE_DLCS_URL = "https://gofile.io/d/jYNvYB"
 
 # Directorio exacto donde anadius unlocker busca sus configuraciones
 APPDATA_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser("~")), 'anadius', 'EA DLC Unlocker v2')
@@ -116,7 +123,7 @@ class UnlockerApp(ctk.CTk):
         super().__init__()
 
         self.title("Unlocker Pro Auto-Setup")
-        self.geometry("680x480")
+        self.geometry("680x600")  # Aumentado para el nuevo botón
         self.resizable(False, False)
 
         self.grid_rowconfigure(0, weight=1)
@@ -150,7 +157,11 @@ class UnlockerApp(ctk.CTk):
             "   ⚠ Se requieren permisos\n"
             "     de Administrador\n\n"
             "   🗑️ Usa 'Desinstalar' para\n"
-            "     eliminar el Unlocker"
+            "     eliminar el Unlocker\n\n"
+            "   🌐 Usa 'Actualizar Sims 3'\n"
+            "     para DLCs desde GitHub\n\n"
+            "   🎮 Usa el botón MORADO para\n"
+            "     INSTALAR TODOS los DLCs"
         )
         self.info_label = ctk.CTkLabel(
             self.left_panel, 
@@ -168,7 +179,9 @@ class UnlockerApp(ctk.CTk):
         self.right_panel.grid_rowconfigure(2, weight=0) 
         self.right_panel.grid_rowconfigure(3, weight=0) 
         self.right_panel.grid_rowconfigure(4, weight=0)
-        self.right_panel.grid_rowconfigure(5, weight=1) 
+        self.right_panel.grid_rowconfigure(5, weight=0)
+        self.right_panel.grid_rowconfigure(6, weight=0)
+        self.right_panel.grid_rowconfigure(7, weight=1)
 
         # Opciones (Checkboxes)
         self.options_frame = ctk.CTkFrame(self.right_panel, fg_color="transparent")
@@ -206,7 +219,7 @@ class UnlockerApp(ctk.CTk):
         self.progressbar.set(0)
         self.progressbar.grid_remove() 
 
-        # Frame para botones
+        # Frame para botones principales
         self.button_frame = ctk.CTkFrame(self.right_panel, fg_color="transparent")
         self.button_frame.grid(row=3, column=0, padx=20, pady=10)
 
@@ -234,9 +247,41 @@ class UnlockerApp(ctk.CTk):
         )
         self.uninstall_button.grid(row=0, column=1, padx=5)
 
+        # Botón para Sims 3 desde GitHub
+        self.ts3_github_frame = ctk.CTkFrame(self.right_panel, fg_color="transparent")
+        self.ts3_github_frame.grid(row=4, column=0, padx=20, pady=5)
+
+        self.ts3_github_button = ctk.CTkButton(
+            self.ts3_github_frame,
+            text="🌐 Actualizar Sims 3 (GitHub)",
+            command=self.start_ts3_github_thread,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            height=40,
+            width=360,
+            fg_color="#1976d2",
+            hover_color="#0d47a1"
+        )
+        self.ts3_github_button.grid(row=0, column=0, padx=5)
+
+        # NUEVO BOTÓN: Instalar TODOS los DLCs de Sims 3 desde Gofile
+        self.all_dlcs_frame = ctk.CTkFrame(self.right_panel, fg_color="transparent")
+        self.all_dlcs_frame.grid(row=5, column=0, padx=20, pady=5)
+
+        self.install_all_dlcs_button = ctk.CTkButton(
+            self.all_dlcs_frame,
+            text="🎮 INSTALAR TODOS LOS DLCS DE SIMS 3",
+            command=self.start_all_dlcs_installation,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            height=50,
+            width=360,
+            fg_color="#9c27b0",
+            hover_color="#6a1b9a"
+        )
+        self.install_all_dlcs_button.grid(row=0, column=0, padx=5)
+
         # Estado de instalación
         self.status_frame = ctk.CTkFrame(self.right_panel, fg_color="transparent")
-        self.status_frame.grid(row=4, column=0, pady=10)
+        self.status_frame.grid(row=6, column=0, pady=10)
 
         self.install_status_label = ctk.CTkLabel(
             self.status_frame,
@@ -366,6 +411,8 @@ class UnlockerApp(ctk.CTk):
             
         self.install_button.configure(state="disabled")
         self.uninstall_button.configure(state="disabled")
+        self.ts3_github_button.configure(state="disabled")
+        self.install_all_dlcs_button.configure(state="disabled")
         self.chk_sims4.configure(state="disabled")
         self.chk_sims3.configure(state="disabled")
         self.progressbar.grid()
@@ -398,6 +445,8 @@ class UnlockerApp(ctk.CTk):
         
         self.install_button.configure(state="disabled")
         self.uninstall_button.configure(state="disabled")
+        self.ts3_github_button.configure(state="disabled")
+        self.install_all_dlcs_button.configure(state="disabled")
         self.chk_sims4.configure(state="disabled")
         self.chk_sims3.configure(state="disabled")
         self.progressbar.grid()
@@ -405,6 +454,265 @@ class UnlockerApp(ctk.CTk):
         
         thread = threading.Thread(target=self.run_uninstall_process, daemon=True)
         thread.start()
+
+    def start_ts3_github_thread(self):
+        """Inicia el proceso de actualización de Sims 3 desde GitHub."""
+        # Verificar permisos de administrador
+        if not self.check_admin_and_continue():
+            return
+        
+        # Confirmar acción
+        response = messagebox.askyesno(
+            "Actualizar Sims 3",
+            "¿Deseas descargar e instalar la configuración de DLCs para Sims 3 desde GitHub?\n\n"
+            "Esto actualizará el archivo de configuración con la última versión disponible."
+        )
+        if not response:
+            return
+        
+        self.install_button.configure(state="disabled")
+        self.uninstall_button.configure(state="disabled")
+        self.ts3_github_button.configure(state="disabled")
+        self.install_all_dlcs_button.configure(state="disabled")
+        self.chk_sims4.configure(state="disabled")
+        self.chk_sims3.configure(state="disabled")
+        self.progressbar.grid()
+        self.progressbar.start()
+        
+        thread = threading.Thread(target=self.run_ts3_github_update, daemon=True)
+        thread.start()
+
+    def start_all_dlcs_installation(self):
+        """Inicia la instalación de TODOS los DLCs de Sims 3 desde Gofile"""
+        if not self.check_admin_and_continue():
+            return
+        
+        # Preguntar al usuario si quiere continuar
+        response = messagebox.askyesno(
+            "Instalar TODOS los DLCs de Sims 3",
+            "⚠️ ESTA OPERACIÓN:\n\n"
+            "• Descargará TODAS las expansiones y stuff packs (varios GB)\n"
+            "• Los instalará automáticamente en tu juego\n"
+            "• Puede tomar varios minutos dependiendo de tu internet\n\n"
+            "✅ Al finalizar, tendrás SIMS 3 COMPLETO con todos los DLCs\n"
+            "✅ Podrás jugar inmediatamente\n\n"
+            "¿Deseas continuar?"
+        )
+        
+        if not response:
+            return
+        
+        # Deshabilitar botones durante la instalación
+        self.install_all_dlcs_button.configure(state="disabled")
+        self.install_button.configure(state="disabled")
+        self.uninstall_button.configure(state="disabled")
+        self.ts3_github_button.configure(state="disabled")
+        self.chk_sims4.configure(state="disabled")
+        self.chk_sims3.configure(state="disabled")
+        
+        self.progressbar.grid()
+        self.progressbar.start()
+        
+        thread = threading.Thread(target=self.install_all_dlcs, daemon=True)
+        thread.start()
+
+    def install_all_dlcs(self):
+        """Instala TODOS los DLCs automáticamente desde Gofile"""
+        try:
+            # 1. Buscar Sims 3
+            self.log_status("🔍 Buscando instalación de Sims 3...")
+            sims3_path = self.find_sims3_installation()
+            
+            if not sims3_path:
+                self.log_status("❌ No se encontró Sims 3, preguntando al usuario...")
+                sims3_path = filedialog.askdirectory(
+                    title="¿DÓNDE ESTÁ INSTALADO SIMS 3?",
+                    initialdir=r"C:\Program Files (x86)\Origin Games"
+                )
+                if not sims3_path:
+                    self.log_status("❌ Instalación cancelada por el usuario")
+                    return
+            
+            self.log_status(f"✅ Sims 3 encontrado en: {sims3_path}")
+            
+            # 2. Usar la URL de Gofile configurada
+            gofile_url = GOFILE_DLCS_URL
+            
+            # 3. Descargar el paquete
+            self.log_status("📥 Descargando TODOS los DLCs (esto puede tomar varios minutos)...")
+            
+            # Crear archivo temporal
+            temp_dir = tempfile.gettempdir()
+            zip_path = os.path.join(temp_dir, "sims3_all_dlcs_temp.zip")
+            
+            # Descargar con barra de progreso
+            response = requests.get(gofile_url, stream=True)
+            total_size = int(response.headers.get('content-length', 0))
+            
+            with open(zip_path, 'wb') as f:
+                if total_size == 0:
+                    f.write(response.content)
+                else:
+                    downloaded = 0
+                    for chunk in response.iter_content(chunk_size=8192):
+                        downloaded += len(chunk)
+                        f.write(chunk)
+                        # Actualizar progreso cada 2%
+                        if total_size > 0:
+                            percent = int(50 * downloaded / total_size)
+                            self.log_status(f"📥 Descargando: {'█' * percent}{'░' * (50 - percent)} {downloaded/(1024*1024):.1f}MB")
+                            self.update_idletasks()
+            
+            self.log_status("✅ Descarga completada")
+            
+            # 4. Extraer DLCs
+            self.log_status("📦 Extrayendo DLCs en la carpeta del juego...")
+            
+            with zipfile.ZipFile(zip_path, 'r') as zipf:
+                # Obtener lista de archivos para la barra de progreso
+                file_list = zipf.namelist()
+                total_files = len(file_list)
+                
+                for i, file in enumerate(file_list):
+                    zipf.extract(file, sims3_path)
+                    if i % 10 == 0:  # Actualizar cada 10 archivos
+                        percent = int(50 * (i + 1) / total_files)
+                        self.log_status(f"📦 Extrayendo: {'█' * percent}{'░' * (50 - percent)} {i+1}/{total_files} archivos")
+                        self.update_idletasks()
+            
+            # 5. Limpiar
+            os.remove(zip_path)
+            
+            # 6. Verificar instalación
+            ep_count = len([d for d in os.listdir(sims3_path) if d.startswith('EP') and os.path.isdir(os.path.join(sims3_path, d))])
+            sp_count = len([d for d in os.listdir(sims3_path) if d.startswith('SP') and os.path.isdir(os.path.join(sims3_path, d))])
+            
+            self.log_status(f"✅ ¡COMPLETADO! {ep_count} expansiones y {sp_count} stuff packs instalados")
+            
+            # 7. Mostrar mensaje de éxito
+            self.after(0, lambda: self.show_success_message(ep_count, sp_count))
+            
+        except Exception as e:
+            self.log_status("❌ Error en la instalación")
+            self.after(0, lambda: self.show_error_message(e))
+        finally:
+            self.progressbar.stop()
+            self.progressbar.grid_remove()
+            self.install_all_dlcs_button.configure(state="normal")
+            self.install_button.configure(state="normal")
+            self.uninstall_button.configure(state="normal")
+            self.ts3_github_button.configure(state="normal")
+            self.chk_sims4.configure(state="normal")
+            self.chk_sims3.configure(state="normal")
+
+    def find_sims3_installation(self):
+        """Busca la instalación de Sims 3 en ubicaciones comunes"""
+        posibles = [
+            r"C:\Program Files (x86)\Origin Games\The Sims 3",
+            r"C:\Program Files\EA Games\The Sims 3",
+            r"D:\Program Files (x86)\Origin Games\The Sims 3",
+            r"E:\Program Files (x86)\Origin Games\The Sims 3",
+        ]
+        
+        # También buscar en otros discos
+        for drive in ['C:', 'D:', 'E:', 'F:']:
+            posibles.append(os.path.join(drive, 'Program Files (x86)', 'Origin Games', 'The Sims 3'))
+            posibles.append(os.path.join(drive, 'Program Files', 'EA Games', 'The Sims 3'))
+        
+        for path in posibles:
+            game_exe = os.path.join(path, 'Game', 'Bin', 'TS3.exe')
+            if os.path.exists(game_exe):
+                return path
+        
+        return None
+
+    def show_success_message(self, ep_count, sp_count):
+        """Muestra mensaje de éxito"""
+        messagebox.showinfo(
+            "🎮 ¡SIMS 3 COMPLETO!",
+            f"✅ INSTALACIÓN EXITOSA\n\n"
+            f"Se instalaron:\n"
+            f"• {ep_count} Expansiones (EP01-EP11)\n"
+            f"• {sp_count} Stuff Packs (SP01-SP09)\n\n"
+            f"✨ ¡AHORA TIENES SIMS 3 COMPLETO!\n\n"
+            f"Puedes abrir el juego y disfrutar de TODOS los DLCs.\n"
+            f"El Unlocker los detectará automáticamente."
+        )
+
+    def run_ts3_github_update(self):
+        """Ejecuta la actualización de Sims 3 desde GitHub."""
+        try:
+            # PASO 1: Verificar si el unlocker está instalado
+            self.log_status("Verificando instalación del Unlocker...")
+            if not self.is_unlocker_installed():
+                self.log_status("⚠ Unlocker no detectado")
+                response = messagebox.askyesno(
+                    "Unlocker no detectado",
+                    "No se detectó el Unlocker instalado en el sistema.\n\n"
+                    "¿Deseas instalar primero el Unlocker base antes de continuar?"
+                )
+                if response:
+                    # Redirigir a instalación normal
+                    self.after(100, self.start_process_thread)
+                    return
+                else:
+                    self.log_status("Operación cancelada: Unlocker no instalado")
+                    return
+
+            # PASO 2: Crear directorio de configuración
+            self.log_status("Preparando directorio de configuración...")
+            os.makedirs(APPDATA_DIR, exist_ok=True)
+
+            # PASO 3: Descargar configuración de Sims 3 desde GitHub
+            self.log_status("Descargando configuración de Sims 3 desde GitHub...")
+            target_path = os.path.join(APPDATA_DIR, INI_TS3)
+            
+            try:
+                req = urllib.request.Request(GITHUB_TS3_INI_URL, headers={'User-Agent': 'Mozilla/5.0 UnlockerBot/1.0'})
+                response = urllib.request.urlopen(req, timeout=15)
+                content = response.read()
+                
+                with open(target_path, 'wb') as f:
+                    f.write(content)
+                
+                self.log_status(f"✅ {INI_TS3} actualizado desde GitHub")
+                
+                # Verificar que se copió correctamente
+                if os.path.exists(target_path):
+                    file_size = os.path.getsize(target_path)
+                    self.log_status(f"✅ Archivo instalado correctamente ({file_size} bytes)")
+                    
+                    messagebox.showinfo(
+                        "Éxito",
+                        f"La configuración de Los Sims 3 ha sido actualizada desde GitHub.\n\n"
+                        f"Archivo instalado: {target_path}\n"
+                        f"Tamaño: {file_size} bytes\n\n"
+                        "Los DLCs deberían estar disponibles al iniciar el juego."
+                    )
+                else:
+                    raise Exception("El archivo no se copió correctamente")
+                    
+            except urllib.error.URLError as e:
+                error_msg = f"No se pudo conectar a GitHub:\n{str(e)}"
+                if hasattr(e, 'code') and e.code == 404:
+                    error_msg = f"Error 404: El archivo no existe en GitHub.\n\nURL: {GITHUB_TS3_INI_URL}"
+                raise Exception(error_msg)
+            except Exception as e:
+                raise Exception(f"Error descargando desde GitHub:\n{str(e)}")
+
+        except Exception as e:
+            self.log_status("Error en la actualización de Sims 3")
+            self.show_error_message(e)
+        finally:
+            self.progressbar.stop()
+            self.progressbar.grid_remove()
+            self.install_button.configure(state="normal")
+            self.uninstall_button.configure(state="normal")
+            self.ts3_github_button.configure(state="normal")
+            self.install_all_dlcs_button.configure(state="normal")
+            self.chk_sims4.configure(state="normal")
+            self.chk_sims3.configure(state="normal")
+            self.update_installation_status()
 
     def run_install_process(self):
         """Ejecuta el proceso de instalación."""
@@ -509,6 +817,8 @@ class UnlockerApp(ctk.CTk):
             self.progressbar.grid_remove()
             self.install_button.configure(state="normal")
             self.uninstall_button.configure(state="normal")
+            self.ts3_github_button.configure(state="normal")
+            self.install_all_dlcs_button.configure(state="normal")
             self.chk_sims4.configure(state="normal")
             self.chk_sims3.configure(state="normal")
 
@@ -574,6 +884,8 @@ class UnlockerApp(ctk.CTk):
             self.progressbar.grid_remove()
             self.install_button.configure(state="normal")
             self.uninstall_button.configure(state="normal")
+            self.ts3_github_button.configure(state="normal")
+            self.install_all_dlcs_button.configure(state="normal")
             self.chk_sims4.configure(state="normal")
             self.chk_sims3.configure(state="normal")
             self.update_installation_status()
@@ -656,6 +968,13 @@ class UnlockerApp(ctk.CTk):
             error_msg += "- Falta de permisos de administrador\n"
             error_msg += "- Antivirus bloqueando la ejecución\n"
             error_msg += "- EA App/Origin no instalado"
+        elif "github" in error_str or "404" in error_str:
+            error_msg += "\n\nVerifica que la URL del archivo en GitHub sea correcta."
+        elif "gofile" in error_str:
+            error_msg += "\n\nError al descargar desde Gofile. Verifica:\n"
+            error_msg += "- Que la URL sea correcta\n"
+            error_msg += "- Tu conexión a internet\n"
+            error_msg += "- Que el archivo siga disponible en Gofile"
         
         messagebox.showerror("Error", error_msg)
 
