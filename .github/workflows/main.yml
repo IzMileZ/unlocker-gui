@@ -72,7 +72,7 @@ jobs:
       shell: pwsh
       run: |
         Write-Host "=== VERIFICANDO EJECUTABLE ===" -ForegroundColor Cyan
-        $exePath = "dist/Kai_Unlocker.exe"
+        $exePath = "dist/Kai_Unlocker_V2.exe"
         
         if (Test-Path $exePath) {
             $fileInfo = Get-Item $exePath
